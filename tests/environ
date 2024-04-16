@@ -1,0 +1,17 @@
+#!/bin/bash
+. $PWD/tests/scripts/tls.sh
+
+if [ -z "$REDIS_VERSION" ]; then
+  export REDIS_VERSION=7.2.4
+fi
+
+if [ -z "$CARGO_HTTP_DEBUG" ]; then
+  export CARGO_HTTP_DEBUG=false
+fi
+
+export ROOT=$PWD
+check_root_dir
+check_cluster_credentials
+if [[ "$?" -eq 0 ]]; then
+  generate_cluster_credentials
+fi

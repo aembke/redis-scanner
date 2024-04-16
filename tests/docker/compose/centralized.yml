@@ -1,0 +1,17 @@
+version: '2'
+
+networks:
+  redis-scanner:
+    driver: bridge
+
+services:
+  redis-main:
+    container_name: "redis-main"
+    image: 'bitnami/redis:${REDIS_VERSION}'
+    environment:
+      - 'REDIS_PORT_NUMBER=6379'
+      - 'ALLOW_EMPTY_PASSWORD=yes'
+    ports:
+      - "6379:6379"
+    networks:
+      - redis-scanner
