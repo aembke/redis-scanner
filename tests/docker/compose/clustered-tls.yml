@@ -5,77 +5,120 @@ networks:
     driver: bridge
 
 services:
-  redis-cluster-1:
-    container_name: "redis-cluster-1"
+  redis-cluster-tls-1:
+    container_name: "redis-cluster-tls-1"
     image: 'bitnami/redis-cluster:${REDIS_VERSION}'
     environment:
       - 'ALLOW_EMPTY_PASSWORD=yes'
-      - 'REDIS_PORT_NUMBER=30001'
-      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_ENABLED=yes'
+      - 'REDIS_TLS_PORT_NUMBER=40001'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-1.pem'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-1.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.pem'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
     ports:
-      - "30001:30001"
+      - "40001:40001"
     networks:
       - redis-scanner
-  redis-cluster-2:
-    container_name: "redis-cluster-2"
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+  redis-cluster-tls-2:
+    container_name: "redis-cluster-tls-2"
     image: 'bitnami/redis-cluster:${REDIS_VERSION}'
     environment:
       - 'ALLOW_EMPTY_PASSWORD=yes'
-      - 'REDIS_PORT_NUMBER=30001'
-      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_PORT_NUMBER=40001'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-2.pem'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-2.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.pem'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
     ports:
-      - "30002:30001"
+      - "40002:40001"
     networks:
       - redis-scanner
-  redis-cluster-3:
-    container_name: "redis-cluster-3"
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+  redis-cluster-tls-3:
+    container_name: "redis-cluster-tls-3"
     image: 'bitnami/redis-cluster:${REDIS_VERSION}'
     environment:
       - 'ALLOW_EMPTY_PASSWORD=yes'
-      - 'REDIS_PORT_NUMBER=30001'
-      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_PORT_NUMBER=40001'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-3.pem'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-3.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.pem'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
     ports:
-      - "30003:30001"
+      - "40003:40001"
     networks:
       - redis-scanner
-  redis-cluster-4:
-    container_name: "redis-cluster-4"
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+  redis-cluster-tls-4:
+    container_name: "redis-cluster-tls-4"
     image: 'bitnami/redis-cluster:${REDIS_VERSION}'
     environment:
       - 'ALLOW_EMPTY_PASSWORD=yes'
-      - 'REDIS_PORT_NUMBER=30001'
-      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_PORT_NUMBER=40001'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-4.pem'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-4.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.pem'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
     ports:
-      - "30004:30001"
+      - "40004:40001"
     networks:
       - redis-scanner
-  redis-cluster-5:
-    container_name: "redis-cluster-5"
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+  redis-cluster-tls-5:
+    container_name: "redis-cluster-tls-5"
     image: 'bitnami/redis-cluster:${REDIS_VERSION}'
     environment:
       - 'ALLOW_EMPTY_PASSWORD=yes'
-      - 'REDIS_PORT_NUMBER=30001'
-      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
+      - 'REDIS_TLS_PORT_NUMBER=40001'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-5.pem'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-5.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.pem'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
     ports:
-      - "30005:30001"
+      - "40005:40001"
     networks:
       - redis-scanner
-  redis-cluster-6:
-    container_name: "redis-cluster-6"
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'
+  redis-cluster-tls-6:
+    container_name: "redis-cluster-tls-6"
     depends_on:
-      - redis-cluster-1
-      - redis-cluster-2
-      - redis-cluster-3
-      - redis-cluster-4
-      - redis-cluster-5
+      - redis-cluster-tls-1
+      - redis-cluster-tls-2
+      - redis-cluster-tls-3
+      - redis-cluster-tls-4
+      - redis-cluster-tls-5
     image: 'bitnami/redis-cluster:${REDIS_VERSION}'
     environment:
       - 'ALLOW_EMPTY_PASSWORD=yes'
-      - 'REDIS_PORT_NUMBER=30001'
-      - 'REDIS_NODES=redis-cluster-1 redis-cluster-2 redis-cluster-3 redis-cluster-4 redis-cluster-5 redis-cluster-6'
+      - 'REDIS_PORT_NUMBER=0'
+      - 'REDIS_NODES=redis-cluster-tls-1 redis-cluster-tls-2 redis-cluster-tls-3 redis-cluster-tls-4 redis-cluster-tls-5 redis-cluster-tls-6'
       - 'REDIS_CLUSTER_REPLICAS=1'
       - 'REDIS_CLUSTER_CREATOR=yes'
+      - 'REDIS_TLS_PORT_NUMBER=40001'
+      - 'REDIS_TLS_CERT_FILE=/opt/bitnami/redis/mounted-etc/creds/node-6.pem'
+      - 'REDIS_TLS_KEY_FILE=/opt/bitnami/redis/mounted-etc/creds/node-6.key'
+      - 'REDIS_TLS_CA_FILE=/opt/bitnami/redis/mounted-etc/creds/ca.pem'
+      - 'REDIS_TLS_AUTH_CLIENTS=optional'
     ports:
-      - "30006:30001"
+      - "40006:40001"
     networks:
       - redis-scanner
+    volumes:
+      - '../../../tests/tmp/creds:/opt/bitnami/redis/mounted-etc/creds'

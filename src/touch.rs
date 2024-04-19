@@ -1,19 +1,20 @@
 use crate::{
-  argv::{Argv, TouchArgv},
+  argv::Argv,
   clear_status,
-  progress::{global_progress, setup_event_logs, Counters, STEADY_TICK_DURATION_MS},
+  output::Output,
+  progress::{global_progress, setup_event_logs, Counters},
   status,
   utils,
   ClusterNode,
+  Command,
 };
 use fred::{
   prelude::*,
-  types::{ClusterHash, CustomCommand, Scanner},
+  types::{ClusterHash, CustomCommand},
 };
-use futures::{future::try_join_all, TryStreamExt};
 use log::{debug, error};
-use std::{sync::Arc, time::Duration};
-use tokio::time::sleep;
+use regex::Regex;
+use std::{future::Future, sync::Arc};
 
 async fn scan_node(
   argv: &Arc<Argv>,
@@ -22,128 +23,111 @@ async fn scan_node(
   client: RedisClient,
 ) -> Result<(usize, usize), RedisError> {
   let touch = CustomCommand::new_static("TOUCH", ClusterHash::FirstKey, false);
-  let (mut local_scanned, mut local_success) = (0, 0);
-  let mut scanner = client.scan(&argv.pattern, Some(argv.page_size), None);
+  let scanner = client.scan(&argv.pattern, Some(argv.page_size), None);
+  let filter = argv.filter.as_ref().and_then(|s| Regex::new(s).ok());
 
-  let mut last_error = None;
-  loop {
-    let mut page = match scanner.try_next().await {
-      Ok(Some(page)) => page,
-      Ok(None) => break,
-      Err(e) => {
-        last_error = Some(e);
-        break;
-      },
-    };
+  utils::scan_server(
+    server.clone(),
+    argv.ignore,
+    argv.delay,
+    scanner,
+    move |mut scanned, mut success, mut skipped, keys| {
+      let (touch, filter, client, server) = (touch.clone(), filter.clone(), client.clone(), server.clone());
 
-    if let Some(results) = page.take_results() {
-      counters.incr_scanned(results.len());
-      local_scanned += results.len();
+      async move {
+        counters.incr_scanned(keys.len());
+        scanned += keys.len();
 
-      if !results.is_empty() {
-        debug!("Calling TOUCH on {} keys...", results.len());
-        let count: usize = match client.custom(touch.clone(), results).await {
-          Ok(amt) => amt,
-          Err(e) => {
-            error!("{} Error calling TOUCH: {:?}", server, e);
-            last_error = Some(e);
-
-            if argv.ignore {
-              let _ = page.next();
-              continue;
+        let keys: Vec<_> = keys
+          .into_iter()
+          .filter(|key| {
+            if utils::regexp_match(&filter, &key) {
+              true
             } else {
-              break;
+              skipped += 1;
+              counters.incr_skipped(1);
+              false
             }
-          },
-        };
+          })
+          .collect();
 
-        counters.incr_success(count);
-        local_success += count;
+        if !keys.is_empty() {
+          debug!("Calling TOUCH on {} keys...", keys.len());
+          // if this fails in this context it's a bug
+          let groups =
+            fred::util::group_by_hash_slot(keys).expect("Failed to group scan results by hash slot. This is a bug.");
+
+          let pipeline = client.pipeline();
+          for (_, keys) in groups.into_iter() {
+            pipeline.custom(touch.clone(), keys.into_iter().collect()).await?;
+          }
+
+          let count = match pipeline.all::<Vec<usize>>().await {
+            Ok(res) => res.into_iter().fold(0, |a, b| a + b),
+            Err(e) => {
+              error!("{} Error calling TOUCH: {:?}", server, e);
+
+              if argv.ignore {
+                return Ok((scanned, success, skipped));
+              } else {
+                return Err(e);
+              }
+            },
+          };
+
+          counters.incr_success(count);
+          success += count;
+        }
+
+        Ok((scanned, success, skipped))
       }
-    }
-
-    if argv.delay > 0 && page.has_more() {
-      if argv.delay > STEADY_TICK_DURATION_MS {
-        global_progress().update(
-          &server,
-          format!("Sleeping for {}ms", argv.delay),
-          Some(local_scanned as u64),
-        );
-      }
-
-      sleep(Duration::from_millis(argv.delay)).await;
-    }
-
-    global_progress().update(
-      &server,
-      format!("{} updated", local_success),
-      Some(local_scanned as u64),
-    );
-    if let Err(e) = page.next() {
-      // the more useful error shows up on the next try_next() call
-      debug!("Error trying to scan next page: {:?}", e);
-    }
-  }
-
-  if let Some(error) = last_error {
-    global_progress().finish(&server, format!("Errored: {:?}", error));
-
-    if argv.ignore {
-      Ok((local_success, local_scanned))
-    } else {
-      Err(error)
-    }
-  } else {
-    let percent = if local_scanned == 0 {
-      0.0
-    } else {
-      local_success as f64 / local_scanned as f64 * 100.0
-    };
-
-    global_progress().finish(
-      &server,
-      format!(
-        "Finished scanning ({}/{} = {:.2}% updated).",
-        local_success, local_scanned, percent
-      ),
-    );
-    Ok((local_success, local_scanned))
-  }
+    },
+  )
+  .await
 }
 
-pub async fn run(argv: &Arc<Argv>, _: &TouchArgv, _: RedisClient, nodes: Vec<ClusterNode>) -> Result<(), RedisError> {
-  let mut tasks = Vec::with_capacity(nodes.len());
-  let counters = Counters::new();
+pub struct TouchCommand;
 
-  status!("Connecting to servers...");
-  for node in nodes.into_iter() {
-    let (argv, counters) = (argv.clone(), counters.clone());
-    tasks.push(tokio::spawn(async move {
-      let client = node.builder.build()?;
-      client.init().await?;
+impl Command for TouchCommand {
+  fn run(
+    argv: Arc<Argv>,
+    _: RedisClient,
+    nodes: Vec<ClusterNode>,
+  ) -> impl Future<Output = Result<Option<Box<dyn Output>>, RedisError>> + Send {
+    async move {
+      let mut tasks = Vec::with_capacity(nodes.len());
+      let counters = Counters::new();
 
-      let estimate: u64 = client.dbsize().await?;
-      global_progress().add_server(&node.server, Some(estimate));
-      let estimate_task = tokio::spawn(utils::update_estimate(node.server.clone(), client.clone()));
-      let event_task = setup_event_logs(&client);
+      status!("Connecting to servers...");
+      for node in nodes.into_iter() {
+        let (argv, counters) = (argv.clone(), counters.clone());
+        tasks.push(tokio::spawn(async move {
+          let client = node.builder.build()?;
+          client.init().await?;
+          utils::check_readonly(&node, &client).await?;
 
-      let result = scan_node(&argv, &counters, node.server, client).await;
-      estimate_task.abort();
-      event_task.abort();
-      result
-    }));
+          let estimate: u64 = client.dbsize().await?;
+          global_progress().add_server(&node.server, Some(estimate));
+          let estimate_task = tokio::spawn(utils::update_estimate(node.server.clone(), client.clone()));
+          let event_task = setup_event_logs(&client);
+
+          let result = scan_node(&argv, &counters, node.server, client).await;
+          estimate_task.abort();
+          event_task.abort();
+          result.map(|_| ())
+        }));
+      }
+
+      clear_status!();
+      if let Err(err) = utils::wait_with_interrupts(tasks).await {
+        eprintln!("Fatal error while scanning: {:?}", err);
+      }
+      status!(format!(
+        "Finished ({}/{} updated).",
+        counters.read_success(),
+        counters.read_scanned()
+      ));
+      Ok(None)
+    }
   }
-  let results = try_join_all(tasks).await?;
-
-  clear_status!();
-  if let Some(err) = results.into_iter().find_map(|e| e.err()) {
-    eprintln!("Fatal error while scanning: {:?}", err);
-  }
-
-  status!(format!(
-    "Finished ({}/{} updated).",
-    counters.read_success(),
-    counters.read_scanned()
-  ));
-  Ok(())
 }

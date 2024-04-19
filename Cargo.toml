@@ -1,5 +1,5 @@
 [package]
-name = "redis-scanner"
+name = "redis_scanner"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
@@ -19,13 +19,14 @@ doc = true
 [dependencies]
 log = "0.4"
 pretty_env_logger = "0.5"
+regex = "1.10"
 futures = "0.3"
 tokio = { version = "1.37", features = ["full"] }
-fred = { version = "9.0.1", features = ["i-std", "i-cluster", "replicas"] }
+fred = { version = "9.0.1", features = ["i-std", "i-cluster", "i-memory", "replicas"] }
 indicatif = "0.17"
 csv = "1.1"
 serde_json = "1.0"
-pretty-table = "0.1"
+prettytable-rs = "0.10.0"
 parking_lot = "0.12"
 chrono = "0.4"
 once_cell = "1.19"
@@ -35,5 +36,5 @@ clap = { version = "4.5", features = ["wrap_help", "derive", "env"] }
 default = []
 enable-rustls = ["fred/enable-rustls"]
 enable-native-tls = ["fred/enable-native-tls"]
-vendored-openssl = ["fred/vendored-openssl"]
-network-logs = ["fred/network-logs"]
+vendored-openssl = ["enable-native-tls", "fred/vendored-openssl"]
+network-logs = ["fred/network-logs", "fred/debug-ids"]

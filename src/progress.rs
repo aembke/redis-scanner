@@ -5,7 +5,7 @@ use fred::{
   types::Server,
 };
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::debug;
+use log::{debug, error};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::{
@@ -20,7 +20,7 @@ pub const STEADY_TICK_DURATION_MS: u64 = 150;
 const SPINNER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] {prefix:.bold} {spinner} {msg}";
 const COUNTER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] {prefix:.bold} {bar:40} {pos}/{len} {msg}";
 const STATUS_BAR_STYLE_TEMPLATE: &str = "{prefix:.bold} {wide_msg}";
-const QUIET_OUTPUT: AtomicUsize = AtomicUsize::new(0);
+static QUIET_OUTPUT: AtomicUsize = AtomicUsize::new(0);
 static PROGRESS: Lazy<Progress> = Lazy::new(|| Progress::default());
 
 pub fn global_progress() -> &'static Progress {
@@ -115,14 +115,18 @@ macro_rules! check_quiet {
 #[macro_export]
 macro_rules! status {
   ($msg:expr) => {
-    crate::progress::global_progress().status.set_message($msg);
+    if !crate::progress::quiet_output() {
+      crate::progress::global_progress().status.set_message($msg);
+    }
   };
 }
 
 #[macro_export]
 macro_rules! clear_status {
   () => {
-    crate::progress::global_progress().status.set_message("");
+    if !crate::progress::quiet_output() {
+      crate::progress::global_progress().status.set_message("");
+    }
   };
 }
 
@@ -170,12 +174,16 @@ impl Progress {
 
   ///
   pub fn update_estimate(&self, server: &Server, estimate: u64) {
+    check_quiet!();
+
     if let Some(bar) = self.bars.lock().get_mut(server) {
       bar.set_length(estimate);
     }
   }
 
   pub fn remove_server(&self, server: &Server) {
+    check_quiet!();
+
     if let Some(bar) = self.bars.lock().remove(server) {
       self.multi.remove(&bar);
       bar.finish_and_clear();
@@ -205,6 +213,8 @@ impl Progress {
   }
 
   pub fn clear(&self) {
+    check_quiet!();
+
     for (_, bar) in self.bars.lock().drain() {
       bar.finish_and_clear();
     }
@@ -233,13 +243,25 @@ pub fn setup_event_logs(client: &RedisClient) -> JoinHandle<()> {
     loop {
       tokio::select! {
         e = errors.recv() => {
-          global_progress().update(&server, format!("Disconnected: {:?}", e), None);
+          if quiet_output() {
+            error!("{} Disconnected {:?}", server, e);
+          }else{
+            global_progress().update(&server, format!("Disconnected: {:?}", e), None);
+          }
         },
         _ = reconnections.recv() => {
-          global_progress().update(&server, "Reconnected", None);
+          if quiet_output() {
+            error!("{} Reconnected", server);
+          }else{
+            global_progress().update(&server, "Reconnected", None);
+          }
         },
         _ = unresponsive.recv() => {
-          global_progress().update(&server, "Unresponsive connection.", None);
+          if quiet_output() {
+            error!("{} Unresponsive connection", server);
+          }else{
+            global_progress().update(&server, "Unresponsive connection.", None);
+          }
         }
       }
     }

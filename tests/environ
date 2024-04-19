@@ -15,3 +15,5 @@ check_cluster_credentials
 if [[ "$?" -eq 0 ]]; then
   generate_cluster_credentials
 fi
+
+export TEST_TLS_CREDS="$ROOT/tests/tmp/creds"

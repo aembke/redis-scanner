@@ -1,6 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
-
-#[derive(Parser, Debug, Clone)]
+#[derive(Parser, Debug, Clone, Default)]
 #[command(
   version,
   about,
@@ -43,13 +42,16 @@ pub struct Argv {
   // TLS Arguments
   /// Whether to use TLS when connecting to servers.
   #[arg(long = "tls", default_value = "false")]
-  pub tls:      bool,
-  /// A file path to the private key for a x509 identity. .
+  pub tls:         bool,
+  /// A file path to the private key for a x509 identity used by the client.
   #[arg(long = "tls-key", value_name = "PATH")]
-  pub tls_key:  Option<String>,
-  /// A file path to the certificate for a x509 identity.
+  pub tls_key:     Option<String>,
+  /// A file path to the certificate for a x509 identity used by the client.
   #[arg(long = "tls-cert", value_name = "PATH")]
-  pub tls_cert: Option<String>,
+  pub tls_cert:    Option<String>,
+  /// A file path to a trusted certificate bundle.
+  #[arg(long = "tls-ca-cert", value_name = "PATH")]
+  pub tls_ca_cert: Option<String>,
 
   // Shared Scan Arguments
   /// The glob pattern to provide in each `SCAN` command.
@@ -63,12 +65,47 @@ pub struct Argv {
   pub delay:     u64,
   /// A regular expression used to filter keys while scanning. Keys that do not match will be skipped before
   /// any subsequent operations are performed.
-  #[arg(short = 'f', long = "filter", value_name = "REGEXP")]
+  #[arg(short = 'f', long = "filter", value_name = "REGEX")]
   pub filter:    Option<String>,
 
   // Command Arguments
   #[command(subcommand)]
   pub command: Commands,
+}
+
+impl Argv {
+  // there's gotta be a better way to do this
+  pub fn fix(mut self) -> Self {
+    if self.tls_cert.is_some() || self.tls_key.is_some() || self.tls_ca_cert.is_some() {
+      self.tls = true;
+    }
+
+    if self.replicas {
+      self.cluster = true;
+    }
+    // env vars can be Some("") when left unset
+    if let Some(username) = self.username.take() {
+      if !username.is_empty() {
+        self.username = Some(username);
+      }
+    }
+    if let Some(password) = self.password.take() {
+      if !password.is_empty() {
+        self.password = Some(password);
+      }
+    }
+
+    self
+  }
+
+  pub fn output_file(&self) -> Option<String> {
+    match self.command {
+      Commands::Memory(ref argv) => argv.file.clone(),
+      Commands::Idle(ref argv) => argv.file.clone(),
+      Commands::Ttl(ref argv) => argv.file.clone(),
+      _ => None,
+    }
+  }
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -78,9 +115,17 @@ pub enum Commands {
   /// Inspect keys via the `MEMORY USAGE` command.
   Memory(MemoryArgv),
   /// Call `TOUCH` on each key.
+  ///
+  /// Default.
   Touch(TouchArgv),
   /// Inspect keys via the `TTL` command.
   Ttl(TtlArgv),
+}
+
+impl Default for Commands {
+  fn default() -> Self {
+    Commands::Touch(TouchArgv {})
+  }
 }
 
 /// The available output formats.
@@ -91,6 +136,12 @@ pub enum OutputFormat {
   Json,
 }
 
+impl Default for OutputFormat {
+  fn default() -> Self {
+    OutputFormat::Table
+  }
+}
+
 /// The sort order to use.
 #[derive(ValueEnum, Clone, Debug)]
 pub enum Sort {
@@ -98,14 +149,23 @@ pub enum Sort {
   Desc,
 }
 
-#[derive(Args, Clone, Debug)]
+impl Default for Sort {
+  fn default() -> Self {
+    Sort::Desc
+  }
+}
+
+#[derive(Args, Clone, Debug, Default)]
 pub struct IdleArgv {
   /// The output format, if applicable.
   #[arg(short = 'f', long = "format", default_value = "table", value_name = "STRING")]
-  pub format: OutputFormat,
+  pub format:         OutputFormat,
   /// The sort order to use.
   #[arg(short = 'S', long = "sort", default_value = "desc", value_name = "STRING")]
-  pub sort:   Sort,
+  pub sort:           Sort,
+  /// The number of records to index in memory while scanning. Default is `--limit + --offset`.
+  #[arg(long = "max-index-size", allow_negative_numbers = false, value_name = "NUMBER")]
+  pub max_index_size: Option<u64>,
   /// The maximum number of results to return.
   #[arg(
     short = 'l',
@@ -114,7 +174,7 @@ pub struct IdleArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub limit:  u64,
+  pub limit:          u64,
   /// The number of results to skip, after sorting. Note: the client must hold at least `limit + offset` keys in
   /// memory.
   #[arg(
@@ -124,21 +184,30 @@ pub struct IdleArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub offset: u64,
+  pub offset:         u64,
+  /// Write the final output to the provided file.
+  #[arg(short = 'F', long = "file", value_name = "PATH")]
+  pub file:           Option<String>,
 }
 
-#[derive(Args, Clone, Debug)]
+#[derive(Args, Clone, Debug, Default)]
 pub struct MemoryArgv {
   /// The output format, if applicable.
   #[arg(short = 'f', long = "format", default_value = "table", value_name = "STRING")]
-  pub format:   OutputFormat,
+  pub format:                OutputFormat,
   /// The sort order to use.
   #[arg(short = 'S', long = "sort", default_value = "desc", value_name = "STRING")]
-  pub sort:     Sort,
-  /// A regular expression used to group or transform keys while aggregating results. This is often used to extract
-  /// substrings in a key.
-  #[arg(short = 'g', long = "group-by", value_name = "REGEXP")]
-  pub group_by: Option<String>,
+  pub sort:                  Sort,
+  /// A regular expression used to group or transform keys (via `Regex::captures`) while aggregating results. This is
+  /// often used to extract substrings in a key.
+  #[arg(short = 'g', long = "group-by", value_name = "REGEX")]
+  pub group_by:              Option<String>,
+  /// A delimiter used to `slice::join` multiple values from `--group-by`, if applicable.
+  #[arg(long = "group-by-delimiter", value_name = "STRING", default_value = ":")]
+  pub group_by_delimiter:    String,
+  /// Whether to skip keys that do not capture anything from the `--group-by` regex.
+  #[arg(long = "filter-missing-groups", default_value = "false")]
+  pub filter_missing_groups: bool,
   /// The maximum number of results to return.
   #[arg(
     short = 'l',
@@ -147,7 +216,7 @@ pub struct MemoryArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub limit:    u64,
+  pub limit:                 u64,
   /// The number of results to skip, after sorting. Note: the client must hold at least `limit + offset` keys in
   /// memory.
   #[arg(
@@ -157,29 +226,32 @@ pub struct MemoryArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub offset:   u64,
+  pub offset:                u64,
+  /// The number of records to index in memory while scanning. Default is `--limit + --offset`.
+  #[arg(long = "max-index-size", allow_negative_numbers = false, value_name = "NUMBER")]
+  pub max_index_size:        Option<u64>,
   /// The number of samples to provide in each `MEMORY USAGE` command.
-  #[arg(
-    short = 's',
-    long = "samples",
-    default_value = "0",
-    allow_negative_numbers = false,
-    value_name = "NUMBER"
-  )]
-  pub samples:  u64,
+  #[arg(short = 's', long = "samples", allow_negative_numbers = false, value_name = "NUMBER")]
+  pub samples:               Option<u32>,
+  /// Write the final output to the provided file.
+  #[arg(short = 'F', long = "file", value_name = "PATH")]
+  pub file:                  Option<String>,
 }
 
-#[derive(Args, Clone, Debug)]
+#[derive(Args, Clone, Debug, Default)]
 pub struct TouchArgv {}
 
-#[derive(Args, Clone, Debug)]
+#[derive(Args, Clone, Debug, Default)]
 pub struct TtlArgv {
   /// The output format, if applicable.
   #[arg(short = 'f', long = "format", default_value = "table", value_name = "STRING")]
-  pub format: OutputFormat,
+  pub format:         OutputFormat,
   /// The sort order to use.
   #[arg(short = 'S', long = "sort", default_value = "desc", value_name = "STRING")]
-  pub sort:   Sort,
+  pub sort:           Sort,
+  /// The number of records to index in memory while scanning. Default is `--limit + --offset`.
+  #[arg(long = "max-index-size", allow_negative_numbers = false, value_name = "NUMBER")]
+  pub max_index_size: Option<u64>,
   /// The maximum number of results to return.
   #[arg(
     short = 'l',
@@ -188,7 +260,7 @@ pub struct TtlArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub limit:  u64,
+  pub limit:          u64,
   /// The number of results to skip, after sorting. Note: the client must hold at least `limit + offset` keys in
   /// memory.
   #[arg(
@@ -198,5 +270,11 @@ pub struct TtlArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub offset: u64,
+  pub offset:         u64,
+  /// Skip keys that do not have a TTL. Missing TTLs act as `-1` for sorting purposes.
+  #[arg(long = "skip-missing", default_value = "false")]
+  pub skip_missing:   bool,
+  /// Write the final output to the provided file.
+  #[arg(short = 'F', long = "file", value_name = "PATH")]
+  pub file:           Option<String>,
 }

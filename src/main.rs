@@ -2,10 +2,13 @@ use clap::Parser;
 use redis_scanner::{
   self,
   argv::{Argv, Commands},
-  status,
+  idle::IdleCommand,
+  memory::MemoryCommand,
+  touch::TouchCommand,
+  ttl::TtlCommand,
+  Command,
 };
-use std::sync::Arc;
-use tokio::runtime::Builder;
+use std::{fs, sync::Arc};
 
 #[macro_use]
 extern crate log;
@@ -13,15 +16,24 @@ extern crate log;
 #[tokio::main]
 async fn main() {
   pretty_env_logger::init();
-  let argv = Arc::new(Argv::parse());
+  let argv = Arc::new(Argv::parse().fix());
+  let file = argv.output_file();
   debug!("Argv: {:?}", argv);
   let (client, nodes) = redis_scanner::init(&argv).await.expect("Failed to initialize");
+  debug!("Discovered nodes: {:?}", nodes);
 
-  // TODO catch ctrl-c and print output so far
-  match argv.command {
-    Commands::Idle(ref inner) => redis_scanner::idle::run(&argv, inner, client, nodes).await.unwrap(),
-    Commands::Ttl(ref inner) => redis_scanner::ttl::run(&argv, inner, client, nodes).await.unwrap(),
-    Commands::Touch(ref inner) => redis_scanner::touch::run(&argv, inner, client, nodes).await.unwrap(),
-    Commands::Memory(ref inner) => redis_scanner::memory::run(&argv, inner, client, nodes).await.unwrap(),
+  let output = match argv.command {
+    Commands::Idle(_) => IdleCommand::run(argv, client, nodes).await.unwrap(),
+    Commands::Ttl(_) => TtlCommand::run(argv, client, nodes).await.unwrap(),
+    Commands::Touch(_) => TouchCommand::run(argv, client, nodes).await.unwrap(),
+    Commands::Memory(_) => MemoryCommand::run(argv, client, nodes).await.unwrap(),
+  };
+  if let Some(output) = output {
+    let output = output.print();
+    if let Some(file) = file {
+      fs::write(file, output).unwrap();
+    } else {
+      println!("{}", output);
+    }
   }
 }
