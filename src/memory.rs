@@ -16,10 +16,10 @@ use std::{
   borrow::Cow,
   future::Future,
   hash::{DefaultHasher, Hash, Hasher},
-  sync::Arc,
+  sync::{atomic::AtomicUsize, Arc},
 };
 
-static HEADERS: &[&str] = &["Key", "Memory"];
+static HEADERS: &[&str] = &["Key", "Memory", "Percent Used"];
 #[derive(Clone, Debug)]
 pub struct Memory {
   pub key:          RedisKey,
@@ -36,10 +36,17 @@ impl Memory {
       .unwrap_or(self.key.as_str_lossy())
   }
 
-  pub fn serialize(self) -> Vec<String> {
+  pub fn serialize(self, total: usize) -> Vec<String> {
+    let used = if total == 0 {
+      0.0
+    } else {
+      self.memory_usage as f64 / total as f64
+    };
+
     vec![
       self.group_or_key().escape_default().to_string(),
       self.memory_usage.to_string(),
+      format!("{:.2}", used * 100.0),
     ]
   }
 }
@@ -69,10 +76,11 @@ impl HashAndOrd for Memory {
 
 #[derive(Clone)]
 pub struct State {
-  pub argv:     Arc<Argv>,
-  pub cmd_argv: Arc<MemoryArgv>,
-  pub counters: Arc<Counters>,
-  pub pqueue:   Arc<PrioQueue<Memory>>,
+  pub argv:       Arc<Argv>,
+  pub cmd_argv:   Arc<MemoryArgv>,
+  pub counters:   Arc<Counters>,
+  pub pqueue:     Arc<PrioQueue<Memory>>,
+  pub total_used: Arc<AtomicUsize>,
 }
 
 impl State {
@@ -92,33 +100,36 @@ impl Output for State {
   }
 
   fn print_table(self: Box<Self>) -> String {
+    let total = utils::read_atomic(&self.total_used);
     let (results, offset) = self.take();
     let rows: Vec<_> = results
       .into_iter()
       .skip(offset)
-      .map(|memory| memory.serialize())
+      .map(|memory| memory.serialize(total))
       .collect();
 
     utils::print_table(HEADERS, rows)
   }
 
   fn print_json(self: Box<Self>) -> String {
+    let total = utils::read_atomic(&self.total_used);
     let (results, offset) = self.take();
     let rows: Vec<_> = results
       .into_iter()
       .skip(offset)
-      .map(|memory| memory.serialize())
+      .map(|memory| memory.serialize(total))
       .collect();
 
     utils::print_json(HEADERS, rows)
   }
 
   fn print_csv(self: Box<Self>) -> String {
+    let total = utils::read_atomic(&self.total_used);
     let (results, offset) = self.take();
     let rows: Vec<_> = results
       .into_iter()
       .skip(offset)
-      .map(|memory| memory.serialize())
+      .map(|memory| memory.serialize(total))
       .collect();
 
     utils::print_csv(HEADERS, rows)
@@ -182,6 +193,10 @@ async fn scan_node(state: &State, server: Server, client: RedisClient) -> Result
 
           for (idx, key) in keys.into_iter().enumerate() {
             if let Some(memory_usage) = sizes[idx] {
+              if memory_usage > 0 {
+                utils::incr_atomic(&state.total_used, memory_usage as usize);
+              }
+
               let group_captures = utils::regexp_capture(&group, &key, &state.cmd_argv.group_by_delimiter);
               if state.cmd_argv.filter_missing_groups && group.is_some() && group_captures.is_none() {
                 skipped += 1;
@@ -224,6 +239,7 @@ impl Command for MemoryCommand {
       let max_size = cmd_argv.max_index_size.unwrap_or(cmd_argv.limit + cmd_argv.offset);
       let pqueue = Arc::new(PrioQueue::new(cmd_argv.sort.clone(), max_size as usize));
       let state = State {
+        total_used: Arc::new(AtomicUsize::new(0)),
         argv: argv.clone(),
         cmd_argv,
         pqueue,
