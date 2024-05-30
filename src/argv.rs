@@ -1,4 +1,6 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use fred::types::RedisValue;
+
 #[derive(Parser, Debug, Clone, Default)]
 #[command(
   version,
@@ -67,6 +69,10 @@ pub struct Argv {
   /// any subsequent operations are performed.
   #[arg(short = 'f', long = "filter", value_name = "REGEX")]
   pub filter:    Option<String>,
+  /// A regular expression used to reject or skip keys while scanning. Keys that match will be skipped before
+  /// any subsequent operations are performed.
+  #[arg(short = 'r', long = "reject", value_name = "REGEX")]
+  pub reject:    Option<String>,
 
   // Command Arguments
   #[command(subcommand)]
@@ -120,6 +126,8 @@ pub enum Commands {
   Touch(TouchArgv),
   /// Inspect keys via the `TTL` command.
   Ttl(TtlArgv),
+  /// Set an expiration on keys.
+  Expire(ExpireArgv),
 }
 
 impl Default for Commands {
@@ -155,17 +163,34 @@ impl Default for Sort {
   }
 }
 
+/// An optional argument to `EXPIRE` (requires Redis >= 7.0.0).
+#[derive(ValueEnum, Clone, Debug)]
+pub enum ExpireArg {
+  NX,
+  XX,
+  GT,
+  LT,
+}
+
+impl ExpireArg {
+  pub fn to_arg(&self) -> RedisValue {
+    RedisValue::from_static_str(match self {
+      ExpireArg::GT => "GT",
+      ExpireArg::LT => "LT",
+      ExpireArg::XX => "XX",
+      ExpireArg::NX => "NX",
+    })
+  }
+}
+
 #[derive(Args, Clone, Debug, Default)]
 pub struct IdleArgv {
   /// The output format, if applicable.
   #[arg(short = 'f', long = "format", default_value = "table", value_name = "STRING")]
-  pub format:         OutputFormat,
+  pub format: OutputFormat,
   /// The sort order to use.
   #[arg(short = 'S', long = "sort", default_value = "desc", value_name = "STRING")]
-  pub sort:           Sort,
-  /// The number of records to index in memory while scanning. Default is `--limit + --offset`.
-  #[arg(long = "max-index-size", allow_negative_numbers = false, value_name = "NUMBER")]
-  pub max_index_size: Option<u64>,
+  pub sort:   Sort,
   /// The maximum number of results to return.
   #[arg(
     short = 'l',
@@ -174,7 +199,7 @@ pub struct IdleArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub limit:          u64,
+  pub limit:  u64,
   /// The number of results to skip, after sorting. Note: the client must hold at least `limit + offset` keys in
   /// memory.
   #[arg(
@@ -184,10 +209,10 @@ pub struct IdleArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub offset:         u64,
+  pub offset: u64,
   /// Write the final output to the provided file.
   #[arg(short = 'F', long = "file", value_name = "PATH")]
-  pub file:           Option<String>,
+  pub file:   Option<String>,
 }
 
 #[derive(Args, Clone, Debug, Default)]
@@ -245,13 +270,10 @@ pub struct TouchArgv {}
 pub struct TtlArgv {
   /// The output format, if applicable.
   #[arg(short = 'f', long = "format", default_value = "table", value_name = "STRING")]
-  pub format:         OutputFormat,
+  pub format:       OutputFormat,
   /// The sort order to use.
   #[arg(short = 'S', long = "sort", default_value = "desc", value_name = "STRING")]
-  pub sort:           Sort,
-  /// The number of records to index in memory while scanning. Default is `--limit + --offset`.
-  #[arg(long = "max-index-size", allow_negative_numbers = false, value_name = "NUMBER")]
-  pub max_index_size: Option<u64>,
+  pub sort:         Sort,
   /// The maximum number of results to return.
   #[arg(
     short = 'l',
@@ -260,7 +282,7 @@ pub struct TtlArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub limit:          u64,
+  pub limit:        u64,
   /// The number of results to skip, after sorting. Note: the client must hold at least `limit + offset` keys in
   /// memory.
   #[arg(
@@ -270,11 +292,24 @@ pub struct TtlArgv {
     allow_negative_numbers = false,
     value_name = "NUMBER"
   )]
-  pub offset:         u64,
+  pub offset:       u64,
   /// Skip keys that do not have a TTL. Missing TTLs act as `-1` for sorting purposes.
   #[arg(long = "skip-missing", default_value = "false")]
-  pub skip_missing:   bool,
+  pub skip_missing: bool,
   /// Write the final output to the provided file.
   #[arg(short = 'F', long = "file", value_name = "PATH")]
-  pub file:           Option<String>,
+  pub file:         Option<String>,
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub struct ExpireArgv {
+  /// The number of seconds provided to `EXPIRE`.
+  #[arg(short = 's', long = "seconds", required = true, value_name = "NUMBER")]
+  pub seconds:   i64,
+  /// An optional qualifier for the `EXPIRE` command (requires Redis >= 7.0.0).
+  #[arg(short = 'q', long = "qualifier")]
+  pub qualifier: Option<ExpireArg>,
+  /// Send the `EXPIRE` command instead of performing a dry run.
+  #[arg(long = "really")]
+  pub really:    bool,
 }

@@ -11,10 +11,12 @@ use parking_lot::Mutex;
 use std::{
   borrow::Cow,
   collections::HashMap,
+  fmt,
+  fmt::Formatter,
   sync::{atomic::AtomicUsize, Arc},
-  time::Duration as StdDuration,
+  time::{Duration as StdDuration, Duration},
 };
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, time::sleep};
 
 pub const STEADY_TICK_DURATION_MS: u64 = 150;
 const SPINNER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] {prefix:.bold} {spinner} {msg}";
@@ -42,6 +44,19 @@ pub struct Counters {
   pub skipped: AtomicUsize,
   pub errored: AtomicUsize,
   pub success: AtomicUsize,
+}
+
+impl fmt::Display for Counters {
+  fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    write!(
+      f,
+      "scanned: {}, skipped: {}, errored: {}, success: {}",
+      utils::read_atomic(&self.scanned),
+      utils::read_atomic(&self.skipped),
+      utils::read_atomic(&self.errored),
+      utils::read_atomic(&self.success)
+    )
+  }
 }
 
 impl Counters {
@@ -119,12 +134,19 @@ macro_rules! status {
       crate::progress::global_progress().status.set_message($msg);
     }
   };
+  ($prefix:expr, $msg:expr) => {
+    if !crate::progress::quiet_output() {
+      crate::progress::global_progress().status.set_prefix($prefix);
+      crate::progress::global_progress().status.set_message($msg);
+    }
+  };
 }
 
 #[macro_export]
 macro_rules! clear_status {
   () => {
     if !crate::progress::quiet_output() {
+      crate::progress::global_progress().status.set_prefix("");
       crate::progress::global_progress().status.set_message("");
     }
   };
@@ -134,6 +156,7 @@ pub struct Progress {
   pub multi:  MultiProgress,
   pub bars:   Mutex<HashMap<Server, ProgressBar>>,
   pub status: ProgressBar,
+  pub totals: ProgressBar,
 }
 
 impl Default for Progress {
@@ -142,17 +165,29 @@ impl Default for Progress {
     let bars = Mutex::new(HashMap::new());
 
     let status_style = ProgressStyle::with_template(STATUS_BAR_STYLE_TEMPLATE).expect("Failed to create status bar");
+    let total_style =
+      ProgressStyle::with_template(COUNTER_BAR_STYLE_TEMPLATE).expect("Failed to create counter template");
+
     let status = multi.add(ProgressBar::new_spinner());
     status.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
     status.set_style(status_style);
+    let totals = multi.add(ProgressBar::new(0));
+    totals.set_prefix("[Totals]");
+    totals.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
+    totals.set_style(total_style);
 
-    Progress { multi, bars, status }
+    Progress {
+      multi,
+      bars,
+      status,
+      totals,
+    }
   }
 }
 
 impl Progress {
   ///
-  pub fn add_server(&self, server: &Server, estimate: Option<u64>) {
+  pub fn add_server(&self, server: &Server, estimate: Option<u64>, prefix: Option<&str>) {
     check_quiet!();
 
     let style = if estimate.is_some() {
@@ -166,7 +201,12 @@ impl Progress {
       self.multi.insert_before(&self.status, ProgressBar::new_spinner())
     };
 
-    bar.set_prefix(format!("{}", server));
+    let prefix = if let Some(prefix) = prefix {
+      format!("{} {}", prefix, server)
+    } else {
+      format!("{}", server)
+    };
+    bar.set_prefix(prefix);
     bar.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
     bar.set_style(style);
     self.bars.lock().insert(server.clone(), bar);
@@ -202,6 +242,11 @@ impl Progress {
 
       bar.set_message(message);
     }
+  }
+
+  pub fn update_totals(&self, counters: &Counters) {
+    check_quiet!();
+    self.totals.set_message(format!("{}", counters));
   }
 
   pub fn finish(&self, server: &Server, message: impl Into<Cow<'static, str>>) {
@@ -263,6 +308,19 @@ pub fn setup_event_logs(client: &RedisClient) -> JoinHandle<()> {
             global_progress().update(&server, "Unresponsive connection.", None);
           }
         }
+      }
+    }
+  })
+}
+
+pub fn watch_totals(counters: &Arc<Counters>) -> JoinHandle<()> {
+  let counters = counters.clone();
+
+  tokio::spawn(async move {
+    if !quiet_output() {
+      loop {
+        global_progress().update_totals(&counters);
+        sleep(Duration::from_secs(1)).await;
       }
     }
   })

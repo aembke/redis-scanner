@@ -3,6 +3,7 @@ use crate::{
   clear_status,
   output::Output,
   pqueue::{HashAndOrd, PrioQueue},
+  progress,
   progress::{global_progress, setup_event_logs, Counters},
   status,
   utils,
@@ -96,14 +97,15 @@ impl Output for State {
 async fn scan_node(state: &State, server: Server, client: RedisClient) -> Result<(usize, usize), RedisError> {
   let scanner = client.scan(&state.argv.pattern, Some(state.argv.page_size), None);
   let filter = state.argv.filter.as_ref().and_then(|s| Regex::new(s).ok());
+  let reject = state.argv.reject.as_ref().and_then(|s| Regex::new(s).ok());
 
   utils::scan_server(
     server.clone(),
     state.argv.ignore,
     state.argv.delay,
     scanner,
-    move |mut scanned, mut success, mut skipped, keys| {
-      let (filter, client, server) = (filter.clone(), client.clone(), server.clone());
+    move |mut scanned, mut success, mut skipped, errored, keys| {
+      let (filter, reject, client, server) = (filter.clone(), reject.clone(), client.clone(), server.clone());
 
       async move {
         state.counters.incr_scanned(keys.len());
@@ -112,12 +114,12 @@ async fn scan_node(state: &State, server: Server, client: RedisClient) -> Result
         let keys: Vec<_> = keys
           .into_iter()
           .filter(|key| {
-            if utils::regexp_match(&filter, &key) {
-              true
-            } else {
+            if utils::should_skip_key_by_regexp(&filter, &reject, key) {
               skipped += 1;
               state.counters.incr_skipped(1);
               false
+            } else {
+              true
             }
           })
           .collect();
@@ -136,7 +138,7 @@ async fn scan_node(state: &State, server: Server, client: RedisClient) -> Result
               error!("{} Error calling TTL: {:?}", server, e);
 
               if state.argv.ignore {
-                return Ok((scanned, success, skipped));
+                return Ok((scanned, success, skipped, errored));
               } else {
                 return Err(e);
               }
@@ -165,7 +167,7 @@ async fn scan_node(state: &State, server: Server, client: RedisClient) -> Result
           }
         }
 
-        Ok((scanned, success, skipped))
+        Ok((scanned, success, skipped, errored))
       }
     },
   )
@@ -188,7 +190,7 @@ impl Command for TtlCommand {
 
       let mut tasks = Vec::with_capacity(nodes.len());
       let counters = Counters::new();
-      let max_size = cmd_argv.max_index_size.unwrap_or(cmd_argv.limit + cmd_argv.offset);
+      let max_size = cmd_argv.limit + cmd_argv.offset;
       let pqueue = Arc::new(PrioQueue::new(cmd_argv.sort.clone(), max_size as usize));
       let state = State {
         argv: argv.clone(),
@@ -197,6 +199,7 @@ impl Command for TtlCommand {
         counters,
       };
 
+      progress::watch_totals(&state.counters);
       status!("Connecting to servers...");
       for node in nodes.into_iter() {
         let state = state.clone();
@@ -206,7 +209,7 @@ impl Command for TtlCommand {
           utils::check_readonly(&node, &client).await?;
 
           let estimate: u64 = client.dbsize().await?;
-          global_progress().add_server(&node.server, Some(estimate));
+          global_progress().add_server(&node.server, Some(estimate), None);
           let estimate_task = tokio::spawn(utils::update_estimate(node.server.clone(), client.clone()));
           let event_task = setup_event_logs(&client);
 

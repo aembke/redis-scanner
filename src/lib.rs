@@ -53,8 +53,8 @@ pub trait Command {
   ) -> impl Future<Output = Result<Option<Box<dyn Output>>, RedisError>> + Send;
 }
 
-pub mod add_ttl;
 pub mod argv;
+pub mod expire;
 pub mod idle;
 pub mod memory;
 pub mod output;

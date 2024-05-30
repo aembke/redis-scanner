@@ -298,22 +298,34 @@ pub async fn check_readonly(node: &ClusterNode, client: &RedisClient) -> Result<
   Ok(())
 }
 
-/// Returns whether the key matches the provided regexp.
-pub fn regexp_match(regex: &Option<Regex>, key: &RedisKey) -> bool {
-  if let Some(regex) = regex.as_ref() {
-    let key_str = key.as_str_lossy();
-    if log_enabled!(log::Level::Trace) {
-      trace!(
-        "Checking {} against {}: {}",
-        key_str,
-        regex.as_str(),
-        regex.is_match(key_str.as_ref())
-      );
-    }
-    regex.is_match(key_str.as_ref())
+/// Returns whether the key should be skipped based on the argv `filter` and `reject` expressions.
+pub fn should_skip_key_by_regexp(filter: &Option<Regex>, reject: &Option<Regex>, key: &RedisKey) -> bool {
+  let matches_filter = if let Some(ref regex) = filter {
+    regexp_match(regex, key)
   } else {
     true
+  };
+  let matches_reject = if let Some(ref regex) = reject {
+    regexp_match(regex, key)
+  } else {
+    false
+  };
+
+  !(matches_filter && !matches_reject)
+}
+
+/// Returns whether the key matches the provided regexp.
+pub fn regexp_match(regex: &Regex, key: &RedisKey) -> bool {
+  let key_str = key.as_str_lossy();
+  if log_enabled!(log::Level::Trace) {
+    trace!(
+      "Checking {} against {}: {}",
+      key_str,
+      regex.as_str(),
+      regex.is_match(key_str.as_ref())
+    );
   }
+  regex.is_match(key_str.as_ref())
 }
 
 /// Returns whether the key matches the provided regexp.
@@ -355,11 +367,11 @@ pub async fn scan_server<F, Fut>(
   func: F,
 ) -> Result<(usize, usize), RedisError>
 where
-  Fut: Future<Output = Result<(usize, usize, usize), RedisError>>,
-  F: Fn(usize, usize, usize, Vec<RedisKey>) -> Fut,
+  Fut: Future<Output = Result<(usize, usize, usize, usize), RedisError>>,
+  F: Fn(usize, usize, usize, usize, Vec<RedisKey>) -> Fut,
 {
   let mut last_error = None;
-  let (mut local_scanned, mut local_success, mut local_skipped) = (0, 0, 0);
+  let (mut local_scanned, mut local_success, mut local_skipped, mut local_errored) = (0, 0, 0, 0);
   pin_mut!(scanner);
 
   loop {
@@ -373,17 +385,19 @@ where
     };
 
     let keys = page.take_results().unwrap_or_default();
-    let (scanned, success, skipped) = match func(local_scanned, local_success, local_skipped, keys).await {
-      Ok(counts) => counts,
-      Err(e) => {
-        error!("Error in scan loop: {:?}", e);
-        last_error = Some(e);
-        break;
-      },
-    };
+    let (scanned, success, skipped, errored) =
+      match func(local_scanned, local_success, local_skipped, local_errored, keys).await {
+        Ok(counts) => counts,
+        Err(e) => {
+          error!("Error in scan loop: {:?}", e);
+          last_error = Some(e);
+          break;
+        },
+      };
     local_scanned = scanned;
     local_success = success;
     local_skipped = skipped;
+    local_errored = errored;
 
     if delay > 0 && page.has_more() {
       if delay > STEADY_TICK_DURATION_MS / 2 {
@@ -395,7 +409,10 @@ where
 
     global_progress().update(
       &server,
-      format!("{} checked, {} skipped", local_success, local_skipped),
+      format!(
+        "{} success, {} skipped, {} errored",
+        local_success, local_skipped, local_errored
+      ),
       Some(local_scanned as u64),
     );
     if let Err(e) = page.next() {
@@ -422,8 +439,8 @@ where
     global_progress().finish(
       &server,
       format!(
-        "Finished scanning ({}/{} = {:.2}% checked, {} skipped).",
-        local_success, local_scanned, percent, local_skipped
+        "Finished scanning ({}/{} = {:.2}% success, {} skipped, {} errored).",
+        local_success, local_scanned, percent, local_skipped, local_errored
       ),
     );
     Ok((local_success, local_scanned))
