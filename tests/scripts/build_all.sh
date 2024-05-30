@@ -21,10 +21,10 @@ cargo build --release --bin redis_scanner --features "enable-native-tls vendored
 mkdir tests/tmp/releases
 for target in "${targets[@]}"
 do
-  mv "target/$target/release/redis_scanner" "tests/tmp/releases/redis_scanner-$target"
+  cp "target/$target/release/redis_scanner" "tests/tmp/releases/redis_scanner-$target"
 done
 
-mv target/x86_64-apple-darwin/release/redis_scanner /tests/tmp/releases/redis_scanner-x86_64-apple-darwin
-mv target/aarch64-apple-darwin/release/redis_scanner tests/tmp/releases/redis_scanner-aarch64-apple-darwin
+cp target/x86_64-apple-darwin/release/redis_scanner tests/tmp/releases/redis_scanner-x86_64-apple-darwin
+cp target/aarch64-apple-darwin/release/redis_scanner tests/tmp/releases/redis_scanner-aarch64-apple-darwin
 
 echo "Finished building."
