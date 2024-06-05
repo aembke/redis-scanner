@@ -14,15 +14,16 @@ use std::{
   fmt,
   fmt::Formatter,
   sync::{atomic::AtomicUsize, Arc},
-  time::{Duration as StdDuration, Duration},
+  time::{Duration as StdDuration, Duration, Instant},
 };
 use tokio::{task::JoinHandle, time::sleep};
 
-pub const STEADY_TICK_DURATION_MS: u64 = 150;
 const SPINNER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] {prefix:.bold} {spinner} {msg}";
-const COUNTER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] {prefix:.bold} {bar:40} {pos}/{len} {msg}";
+const COUNTER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] [{eta_precise}] {prefix:.bold} {bar:25} \
+                                          {human_pos}/{human_len} {percent_precise}% {per_sec} {msg}";
 const STATUS_BAR_STYLE_TEMPLATE: &str = "{prefix:.bold} {wide_msg}";
 static QUIET_OUTPUT: AtomicUsize = AtomicUsize::new(0);
+static MIN_REFRESH_DELAY: AtomicUsize = AtomicUsize::new(0);
 static PROGRESS: Lazy<Progress> = Lazy::new(|| Progress::default());
 
 pub fn global_progress() -> &'static Progress {
@@ -31,6 +32,14 @@ pub fn global_progress() -> &'static Progress {
 
 pub fn quiet_output() -> bool {
   utils::read_atomic(&QUIET_OUTPUT) != 0
+}
+
+pub fn min_refresh_delay() -> u64 {
+  utils::read_atomic(&MIN_REFRESH_DELAY) as u64
+}
+
+pub fn set_min_refresh_delay(dur: usize) {
+  utils::set_atomic(&MIN_REFRESH_DELAY, dur);
 }
 
 pub fn set_quiet_output(val: bool) {
@@ -152,9 +161,54 @@ macro_rules! clear_status {
   };
 }
 
+pub struct ServerBars {
+  pub bars:    HashMap<Server, ProgressBar>,
+  pub updated: HashMap<Server, Instant>,
+}
+
+impl ServerBars {
+  pub fn add_bar(&mut self, server: Server, bar: ProgressBar) {
+    self.updated.insert(server.clone(), Instant::now());
+    self.bars.insert(server, bar);
+  }
+
+  pub fn try_update_bar<F>(&mut self, server: &Server, func: F)
+  where
+    F: FnOnce(&ProgressBar),
+  {
+    let should_update = if min_refresh_delay() > 0 {
+      let now = Instant::now();
+
+      if let Some(last_updated) = self.updated.get(server) {
+        let dur = now
+          .checked_duration_since(*last_updated)
+          .unwrap_or_else(|| Duration::from_millis(0));
+
+        if dur.as_millis() >= min_refresh_delay() as u128 {
+          self.updated.insert(server.clone(), now);
+          true
+        } else {
+          false
+        }
+      } else {
+        self.updated.insert(server.clone(), now);
+        false
+      }
+    } else {
+      true
+    };
+
+    if should_update {
+      if let Some(bar) = self.bars.get(server) {
+        func(bar);
+      }
+    }
+  }
+}
+
 pub struct Progress {
   pub multi:  MultiProgress,
-  pub bars:   Mutex<HashMap<Server, ProgressBar>>,
+  pub bars:   Mutex<ServerBars>,
   pub status: ProgressBar,
   pub totals: ProgressBar,
 }
@@ -162,18 +216,21 @@ pub struct Progress {
 impl Default for Progress {
   fn default() -> Self {
     let multi = MultiProgress::new();
-    let bars = Mutex::new(HashMap::new());
+    let bars = Mutex::new(ServerBars {
+      bars:    HashMap::new(),
+      updated: HashMap::new(),
+    });
 
     let status_style = ProgressStyle::with_template(STATUS_BAR_STYLE_TEMPLATE).expect("Failed to create status bar");
     let total_style =
-      ProgressStyle::with_template(COUNTER_BAR_STYLE_TEMPLATE).expect("Failed to create counter template");
+      ProgressStyle::with_template(SPINNER_BAR_STYLE_TEMPLATE).expect("Failed to create counter template");
 
     let status = multi.add(ProgressBar::new_spinner());
-    status.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
+    status.enable_steady_tick(StdDuration::from_millis(1000));
     status.set_style(status_style);
-    let totals = multi.add(ProgressBar::new(0));
+    let totals = multi.add(ProgressBar::new_spinner());
     totals.set_prefix("[Totals]");
-    totals.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
+    totals.enable_steady_tick(StdDuration::from_millis(1000));
     totals.set_style(total_style);
 
     Progress {
@@ -196,9 +253,9 @@ impl Progress {
       ProgressStyle::with_template(SPINNER_BAR_STYLE_TEMPLATE).expect("Failed to create spinner template")
     };
     let bar = if let Some(est) = estimate {
-      self.multi.insert_before(&self.status, ProgressBar::new(est))
+      self.multi.insert_after(&self.status, ProgressBar::new(est))
     } else {
-      self.multi.insert_before(&self.status, ProgressBar::new_spinner())
+      self.multi.insert_after(&self.status, ProgressBar::new_spinner())
     };
 
     let prefix = if let Some(prefix) = prefix {
@@ -207,16 +264,15 @@ impl Progress {
       format!("{}", server)
     };
     bar.set_prefix(prefix);
-    bar.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
     bar.set_style(style);
-    self.bars.lock().insert(server.clone(), bar);
+    self.bars.lock().add_bar(server.clone(), bar);
   }
 
   ///
   pub fn update_estimate(&self, server: &Server, estimate: u64) {
     check_quiet!();
 
-    if let Some(bar) = self.bars.lock().get_mut(server) {
+    if let Some(bar) = self.bars.lock().bars.get_mut(server) {
       bar.set_length(estimate);
     }
   }
@@ -224,7 +280,7 @@ impl Progress {
   pub fn remove_server(&self, server: &Server) {
     check_quiet!();
 
-    if let Some(bar) = self.bars.lock().remove(server) {
+    if let Some(bar) = self.bars.lock().bars.remove(server) {
       self.multi.remove(&bar);
       bar.finish_and_clear();
     }
@@ -233,7 +289,7 @@ impl Progress {
   pub fn update(&self, server: &Server, message: impl Into<Cow<'static, str>>, position: Option<u64>) {
     check_quiet!();
 
-    if let Some(bar) = self.bars.lock().get(server) {
+    self.bars.lock().try_update_bar(server, move |bar| {
       if let Some(pos) = position {
         if bar.length().is_some() {
           bar.set_position(pos);
@@ -241,7 +297,7 @@ impl Progress {
       }
 
       bar.set_message(message);
-    }
+    });
   }
 
   pub fn update_totals(&self, counters: &Counters) {
@@ -252,7 +308,7 @@ impl Progress {
   pub fn finish(&self, server: &Server, message: impl Into<Cow<'static, str>>) {
     check_quiet!();
 
-    if let Some(bar) = self.bars.lock().get(server) {
+    if let Some(bar) = self.bars.lock().bars.get(server) {
       bar.finish_with_message(message);
     }
   }
@@ -260,7 +316,7 @@ impl Progress {
   pub fn clear(&self) {
     check_quiet!();
 
-    for (_, bar) in self.bars.lock().drain() {
+    for (_, bar) in self.bars.lock().bars.drain() {
       bar.finish_and_clear();
     }
     if let Err(e) = self.multi.clear() {

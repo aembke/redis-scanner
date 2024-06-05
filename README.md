@@ -6,38 +6,72 @@ Utilities for inspecting Redis servers via the `SCAN` interface.
 ## Commands
 
 ```
-Redis scanning utilities.
+Utilities for inspecting a Redis keyspace via the SCAN command.
 
-Usage: redis-scanner [OPTIONS] <COMMAND>
+Usage: redis_scanner [OPTIONS] <COMMAND>
 
 Commands:
   idle    Inspect keys via the `OBJECT IDLETIME` command
   memory  Inspect keys via the `MEMORY USAGE` command
   touch   Call `TOUCH` on each key
   ttl     Inspect keys via the `TTL` command
+  expire  Set an expiration on keys
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-  -H, --host <STRING>              The server hostname [default: 127.0.0.1]
-  -p, --port <NUMBER>              The server port [default: 6379]
-      --db <NUMBER>                The database to `SELECT` after connecting
-  -u, --username <STRING>          The username to provide when authenticating [env: REDIS_USERNAME=]
-  -P, --password <STRING>          The password to provide after connection [env: REDIS_PASSWORD=]
-      --sentinel-service <STRING>  The name of the sentinel service, if using a sentinel deployment
-  -c, --cluster                    Whether to discover other nodes in a Redis cluster
-  -r, --replicas                   Whether to scan replicas rather than primary nodes. This also implies `--cluster`
-  -q, --quiet                      Whether to hide progress bars and messages before the final output
-  -i, --ignore                     Ignore errors, if possible
-      --tls                        Whether to use TLS when connecting to servers
-      --tls-key <PATH>             A file path to the private key for a x509 identity used by the client
-      --tls-cert <PATH>            A file path to the certificate for a x509 identity used by the client
-      --tls-ca-cert <PATH>         A file path to a trusted certificate bundle
-      --pattern <STRING>           The glob pattern to provide in each `SCAN` command [default: *]
-      --page-size <PAGE_SIZE>      The number of results to request in each `SCAN` command [default: 100]
-  -d, --delay <DELAY>              A delay, in milliseconds, to wait between `SCAN` commands [default: 0]
-  -f, --filter <REGEX>             A regular expression used to filter keys while scanning. Keys that do not match will be skipped before any subsequent operations are performed
-  -h, --help                       Print help (see more with '--help')
-  -V, --version                    Print version
+  -H, --host <STRING>
+          The server hostname
+          [default: 127.0.0.1]
+  -p, --port <NUMBER>
+          The server port
+          [default: 6379]
+      --db <NUMBER>
+          The database to `SELECT` after connecting
+  -u, --username <STRING>
+          The username to provide when authenticating
+          [env: REDIS_USERNAME=]
+  -P, --password <STRING>
+          The password to provide after connection
+          [env: REDIS_PASSWORD=]
+      --sentinel-service <STRING>
+          The name of the sentinel service, if using a sentinel deployment
+  -c, --cluster
+          Whether to discover other nodes in a Redis cluster
+  -r, --replicas
+          Whether to scan replicas rather than primary nodes. This also implies `--cluster`
+  -q, --quiet
+          Whether to hide progress bars and messages before the final output
+  -i, --ignore
+          Ignore errors, if possible
+  -R, --reconnect <NUMBER>
+          An optional reconnection delay. If not provided the client will stop scanning after any disconnection
+      --tls
+          Whether to use TLS when connecting to servers
+      --tls-key <PATH>
+          A file path to the private key for a x509 identity used by the client
+      --tls-cert <PATH>
+          A file path to the certificate for a x509 identity used by the client
+      --tls-ca-cert <PATH>
+          A file path to a trusted certificate bundle
+      --pattern <STRING>
+          The glob pattern to provide in each `SCAN` command
+          [default: *]
+      --page-size <PAGE_SIZE>
+          The number of results to request in each `SCAN` command
+          [default: 100]
+  -d, --delay <DELAY>
+          A delay, in milliseconds, to wait between `SCAN` commands
+          [default: 0]
+  -f, --filter <REGEX>
+          A regular expression used to filter keys while scanning. Keys that do not match will be skipped before any subsequent operations are performed
+  -r, --reject <REGEX>
+          A regular expression used to reject or skip keys while scanning. Keys that match will be skipped before any subsequent operations are performed
+      --min-refresh-delay <NUMBER>
+          Set a minimum refresh delay between progress bar updates, in milliseconds.
+  -h, --help
+          Print help (see a summary with '-h')
+  -V, --version
+          Print version
 ```
 
 ### Idle
@@ -169,7 +203,6 @@ $ redis_scanner memory --group-by "^(\w+):\d*"
 | users    | 144    |
 +----------+--------+
 ```
-
 
 ## TLS Notes
 

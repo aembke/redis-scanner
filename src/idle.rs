@@ -220,12 +220,6 @@ impl Command for IdleCommand {
       if let Err(err) = utils::wait_with_interrupts(tasks).await {
         eprintln!("Fatal error while scanning: {:?}", err);
       }
-      status!(format!(
-        "Finished ({}/{} updated, {} skipped).",
-        state.counters.read_success(),
-        state.counters.read_scanned(),
-        state.counters.read_skipped()
-      ));
       Ok(Some(Box::new(state) as Box<dyn Output>))
     }
   }

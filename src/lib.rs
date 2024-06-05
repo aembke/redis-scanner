@@ -1,4 +1,4 @@
-use crate::{argv::Argv, output::Output, progress::set_quiet_output};
+use crate::{argv::Argv, output::Output};
 use fred::prelude::*;
 use std::{fmt, future::Future, sync::Arc};
 
@@ -23,9 +23,6 @@ impl fmt::Debug for ClusterNode {
 
 /// Initialize the client and discover any other servers to be scanned.
 pub async fn init(argv: &Argv) -> Result<(RedisClient, Vec<ClusterNode>), RedisError> {
-  if argv.quiet {
-    set_quiet_output(true);
-  }
   status!("Discovering servers...");
 
   let (builder, client) = utils::init(argv).await?;

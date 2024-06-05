@@ -1,8 +1,4 @@
-use crate::{
-  argv::Argv,
-  progress::{global_progress, STEADY_TICK_DURATION_MS},
-  ClusterNode,
-};
+use crate::{argv::Argv, progress::global_progress, ClusterNode};
 use chrono::Duration;
 use fred::{
   cmd,
@@ -42,6 +38,7 @@ use fred::types::TlsConnector;
 #[cfg(any(feature = "enable-native-tls", feature = "enable-rustls"))]
 use std::fs;
 
+use crate::progress::min_refresh_delay;
 #[cfg(any(feature = "enable-native-tls", feature = "enable-rustls"))]
 use log::debug;
 
@@ -206,6 +203,9 @@ pub fn change_builder_server(builder: &Builder, server: &Server) -> Result<Build
   let mut out = Builder::from_config(config);
   out.set_connection_config(builder.get_connection_config().clone());
   out.set_performance_config(builder.get_performance_config().clone());
+  if let Some(policy) = builder.get_policy() {
+    out.set_policy(policy.clone());
+  }
   Ok(out)
 }
 
@@ -238,24 +238,25 @@ pub async fn init(argv: &Argv) -> Result<(Builder, RedisClient), RedisError> {
   };
 
   let mut builder = Builder::from_config(config);
-  builder
-    .with_connection_config(|config| {
-      config.unresponsive = UnresponsiveConfig {
-        max_timeout: Some(StdDuration::from_millis(10_000)),
-        interval:    StdDuration::from_millis(2_000),
-      };
+  builder.with_connection_config(|config| {
+    config.unresponsive = UnresponsiveConfig {
+      max_timeout: Some(StdDuration::from_millis(10_000)),
+      interval:    StdDuration::from_millis(2_000),
+    };
 
-      if argv.replicas {
-        config.replica = ReplicaConfig {
-          lazy_connections: true,
-          primary_fallback: true,
-          ignore_reconnection_errors: true,
-          connection_error_count: 1,
-          ..Default::default()
-        };
-      }
-    })
-    .set_policy(ReconnectPolicy::new_exponential(0, 100, 10_000, 2));
+    if argv.replicas {
+      config.replica = ReplicaConfig {
+        lazy_connections: true,
+        primary_fallback: true,
+        ignore_reconnection_errors: true,
+        connection_error_count: 1,
+        ..Default::default()
+      };
+    }
+  });
+  if let Some(dur) = argv.reconnect {
+    builder.set_policy(ReconnectPolicy::new_constant(0, dur));
+  }
 
   let client = builder.build()?;
   client.init().await?;
@@ -400,7 +401,7 @@ where
     local_errored = errored;
 
     if delay > 0 && page.has_more() {
-      if delay > STEADY_TICK_DURATION_MS / 2 {
+      if delay > min_refresh_delay() / 2 {
         global_progress().update(&server, format!("Sleeping for {}ms", delay), Some(local_scanned as u64));
       }
 
@@ -415,6 +416,7 @@ where
       ),
       Some(local_scanned as u64),
     );
+
     if let Err(e) = page.next() {
       // the more useful error shows up on the next try_next() call
       warn!("Error trying to scan next page: {:?}", e);
