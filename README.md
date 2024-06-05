@@ -66,8 +66,8 @@ Options:
           A regular expression used to filter keys while scanning. Keys that do not match will be skipped before any subsequent operations are performed
   -r, --reject <REGEX>
           A regular expression used to reject or skip keys while scanning. Keys that match will be skipped before any subsequent operations are performed
-      --refresh-delay <NUMBER>
-          Set a maximum refresh rate for the terminal progress bars, in milliseconds
+      --min-refresh-delay <NUMBER>
+          Set a minimum refresh delay between progress bar updates, in milliseconds.
   -h, --help
           Print help (see a summary with '-h')
   -V, --version

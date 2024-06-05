@@ -1,8 +1,4 @@
-use crate::{
-  argv::Argv,
-  progress::{global_progress, tick_duration},
-  ClusterNode,
-};
+use crate::{argv::Argv, progress::global_progress, ClusterNode};
 use chrono::Duration;
 use fred::{
   cmd,
@@ -42,6 +38,7 @@ use fred::types::TlsConnector;
 #[cfg(any(feature = "enable-native-tls", feature = "enable-rustls"))]
 use std::fs;
 
+use crate::progress::min_refresh_delay;
 #[cfg(any(feature = "enable-native-tls", feature = "enable-rustls"))]
 use log::debug;
 
@@ -404,7 +401,7 @@ where
     local_errored = errored;
 
     if delay > 0 && page.has_more() {
-      if delay > tick_duration() / 2 {
+      if delay > min_refresh_delay() / 2 {
         global_progress().update(&server, format!("Sleeping for {}ms", delay), Some(local_scanned as u64));
       }
 

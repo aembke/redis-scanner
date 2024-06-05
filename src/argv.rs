@@ -1,4 +1,4 @@
-use crate::progress::{set_quiet_output, set_tick_duration};
+use crate::progress::{set_min_refresh_delay, set_quiet_output};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fred::types::RedisValue;
 
@@ -78,8 +78,8 @@ pub struct Argv {
   #[arg(short = 'r', long = "reject", value_name = "REGEX")]
   pub reject:    Option<String>,
 
-  /// Set a maximum refresh rate for the terminal progress bars, in milliseconds.
-  #[arg(long = "refresh-delay", value_name = "NUMBER")]
+  /// Set a minimum refresh delay between progress bar updates, in milliseconds.
+  #[arg(long = "min-refresh-delay", value_name = "NUMBER")]
   pub refresh: Option<u64>,
   // Command Arguments
   #[command(subcommand)]
@@ -89,7 +89,7 @@ pub struct Argv {
 impl Argv {
   pub fn set_globals(&self) {
     if let Some(dur) = self.refresh {
-      set_tick_duration(dur as usize);
+      set_min_refresh_delay(dur as usize);
     }
     if self.quiet {
       set_quiet_output(true);
