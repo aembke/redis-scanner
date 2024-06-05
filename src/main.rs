@@ -19,6 +19,7 @@ async fn main() {
   pretty_env_logger::init();
   let argv = Arc::new(Argv::parse().fix());
   let file = argv.output_file();
+  argv.set_globals();
   debug!("Argv: {:?}", argv);
   let (client, nodes) = redis_scanner::init(&argv).await.expect("Failed to initialize");
   debug!("Discovered nodes: {:?}", nodes);
@@ -35,7 +36,7 @@ async fn main() {
     if let Some(file) = file {
       fs::write(file, output).unwrap();
     } else {
-      tokio::time::sleep(Duration::from_millis(5)).await;
+      tokio::time::sleep(Duration::from_millis(50)).await;
       println!("{}", output);
     }
   }

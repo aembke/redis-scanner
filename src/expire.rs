@@ -166,7 +166,6 @@ impl Command for ExpireCommand {
       if let Err(err) = utils::wait_with_interrupts(tasks).await {
         eprintln!("Fatal error while scanning: {:?}", err);
       }
-      println!("{}", state.counters);
       Ok(None)
     }
   }

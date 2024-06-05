@@ -131,11 +131,6 @@ impl Command for TouchCommand {
       if let Err(err) = utils::wait_with_interrupts(tasks).await {
         eprintln!("Fatal error while scanning: {:?}", err);
       }
-      status!(format!(
-        "Finished ({}/{} updated).",
-        counters.read_success(),
-        counters.read_scanned()
-      ));
       Ok(None)
     }
   }

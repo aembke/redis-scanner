@@ -101,36 +101,42 @@ impl Output for State {
   }
 
   fn print_table(self: Box<Self>) -> String {
+    let limit = self.cmd_argv.limit as usize;
     let total = utils::read_atomic(&self.total_used);
     let (results, offset) = self.take();
     let rows: Vec<_> = results
       .into_iter()
       .skip(offset)
       .map(|memory| memory.serialize(total))
+      .take(limit)
       .collect();
 
     utils::print_table(HEADERS, rows)
   }
 
   fn print_json(self: Box<Self>) -> String {
+    let limit = self.cmd_argv.limit as usize;
     let total = utils::read_atomic(&self.total_used);
     let (results, offset) = self.take();
     let rows: Vec<_> = results
       .into_iter()
       .skip(offset)
       .map(|memory| memory.serialize(total))
+      .take(limit)
       .collect();
 
     utils::print_json(HEADERS, rows)
   }
 
   fn print_csv(self: Box<Self>) -> String {
+    let limit = self.cmd_argv.limit as usize;
     let total = utils::read_atomic(&self.total_used);
     let (results, offset) = self.take();
     let rows: Vec<_> = results
       .into_iter()
       .skip(offset)
       .map(|memory| memory.serialize(total))
+      .take(limit)
       .collect();
 
     utils::print_csv(HEADERS, rows)
@@ -279,12 +285,6 @@ impl Command for MemoryCommand {
       if let Err(err) = utils::wait_with_interrupts(tasks).await {
         eprintln!("Fatal error while scanning: {:?}", err);
       }
-      status!(format!(
-        "Finished ({}/{} updated, {} skipped).",
-        state.counters.read_success(),
-        state.counters.read_scanned(),
-        state.counters.read_skipped()
-      ));
       Ok(Some(Box::new(state) as Box<dyn Output>))
     }
   }

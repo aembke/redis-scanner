@@ -1,3 +1,4 @@
+use crate::progress::{set_quiet_output, set_tick_duration};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use fred::types::RedisValue;
 
@@ -5,7 +6,7 @@ use fred::types::RedisValue;
 #[command(
   version,
   about,
-  long_about = "Utilities for inspecting aspects of a Redis keyspace via the SCAN command."
+  long_about = "Utilities for inspecting a Redis keyspace via the SCAN command."
 )]
 #[command(propagate_version = true)]
 pub struct Argv {
@@ -40,6 +41,9 @@ pub struct Argv {
   /// Ignore errors, if possible.
   #[arg(short = 'i', long = "ignore", default_value = "false")]
   pub ignore:           bool,
+  /// An optional reconnection delay. If not provided the client will stop scanning after any disconnection.
+  #[arg(short = 'R', long = "reconnect", value_name = "NUMBER")]
+  pub reconnect:        Option<u32>,
 
   // TLS Arguments
   /// Whether to use TLS when connecting to servers.
@@ -74,12 +78,24 @@ pub struct Argv {
   #[arg(short = 'r', long = "reject", value_name = "REGEX")]
   pub reject:    Option<String>,
 
+  /// Set a maximum refresh rate for the terminal progress bars, in milliseconds.
+  #[arg(long = "refresh-delay", value_name = "NUMBER")]
+  pub refresh: Option<u64>,
   // Command Arguments
   #[command(subcommand)]
   pub command: Commands,
 }
 
 impl Argv {
+  pub fn set_globals(&self) {
+    if let Some(dur) = self.refresh {
+      set_tick_duration(dur as usize);
+    }
+    if self.quiet {
+      set_quiet_output(true);
+    }
+  }
+
   // there's gotta be a better way to do this
   pub fn fix(mut self) -> Self {
     if self.tls_cert.is_some() || self.tls_key.is_some() || self.tls_ca_cert.is_some() {

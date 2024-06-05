@@ -18,11 +18,12 @@ use std::{
 };
 use tokio::{task::JoinHandle, time::sleep};
 
-pub const STEADY_TICK_DURATION_MS: u64 = 150;
 const SPINNER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] {prefix:.bold} {spinner} {msg}";
-const COUNTER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] {prefix:.bold} {bar:40} {pos}/{len} {msg}";
+const COUNTER_BAR_STYLE_TEMPLATE: &str = "[{elapsed_precise}] [{eta_precise}] {prefix:.bold} {bar:25} \
+                                          {human_pos}/{human_len} {percent_precise}% {per_sec} {msg}";
 const STATUS_BAR_STYLE_TEMPLATE: &str = "{prefix:.bold} {wide_msg}";
 static QUIET_OUTPUT: AtomicUsize = AtomicUsize::new(0);
+static TICK_DURATION: AtomicUsize = AtomicUsize::new(200);
 static PROGRESS: Lazy<Progress> = Lazy::new(|| Progress::default());
 
 pub fn global_progress() -> &'static Progress {
@@ -31,6 +32,14 @@ pub fn global_progress() -> &'static Progress {
 
 pub fn quiet_output() -> bool {
   utils::read_atomic(&QUIET_OUTPUT) != 0
+}
+
+pub fn tick_duration() -> u64 {
+  utils::read_atomic(&TICK_DURATION) as u64
+}
+
+pub fn set_tick_duration(dur: usize) {
+  utils::set_atomic(&TICK_DURATION, dur);
 }
 
 pub fn set_quiet_output(val: bool) {
@@ -166,14 +175,14 @@ impl Default for Progress {
 
     let status_style = ProgressStyle::with_template(STATUS_BAR_STYLE_TEMPLATE).expect("Failed to create status bar");
     let total_style =
-      ProgressStyle::with_template(COUNTER_BAR_STYLE_TEMPLATE).expect("Failed to create counter template");
+      ProgressStyle::with_template(SPINNER_BAR_STYLE_TEMPLATE).expect("Failed to create counter template");
 
     let status = multi.add(ProgressBar::new_spinner());
-    status.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
+    status.enable_steady_tick(StdDuration::from_millis(tick_duration()));
     status.set_style(status_style);
-    let totals = multi.add(ProgressBar::new(0));
+    let totals = multi.add(ProgressBar::new_spinner());
     totals.set_prefix("[Totals]");
-    totals.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
+    totals.enable_steady_tick(StdDuration::from_millis(tick_duration()));
     totals.set_style(total_style);
 
     Progress {
@@ -196,9 +205,9 @@ impl Progress {
       ProgressStyle::with_template(SPINNER_BAR_STYLE_TEMPLATE).expect("Failed to create spinner template")
     };
     let bar = if let Some(est) = estimate {
-      self.multi.insert_before(&self.status, ProgressBar::new(est))
+      self.multi.insert_after(&self.status, ProgressBar::new(est))
     } else {
-      self.multi.insert_before(&self.status, ProgressBar::new_spinner())
+      self.multi.insert_after(&self.status, ProgressBar::new_spinner())
     };
 
     let prefix = if let Some(prefix) = prefix {
@@ -207,7 +216,7 @@ impl Progress {
       format!("{}", server)
     };
     bar.set_prefix(prefix);
-    bar.enable_steady_tick(StdDuration::from_millis(STEADY_TICK_DURATION_MS));
+    bar.enable_steady_tick(StdDuration::from_millis(tick_duration()));
     bar.set_style(style);
     self.bars.lock().insert(server.clone(), bar);
   }
