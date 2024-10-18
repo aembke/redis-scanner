@@ -75,7 +75,7 @@ pub struct Argv {
   pub filter:    Option<String>,
   /// A regular expression used to reject or skip keys while scanning. Keys that match will be skipped before
   /// any subsequent operations are performed.
-  #[arg(short = 'r', long = "reject", value_name = "REGEX")]
+  #[arg(short = 's', long = "reject", value_name = "REGEX")]
   pub reject:    Option<String>,
 
   /// Set a minimum refresh delay between progress bar updates, in milliseconds.

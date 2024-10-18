@@ -64,7 +64,7 @@ Options:
           [default: 0]
   -f, --filter <REGEX>
           A regular expression used to filter keys while scanning. Keys that do not match will be skipped before any subsequent operations are performed
-  -r, --reject <REGEX>
+  -s, --reject <REGEX>
           A regular expression used to reject or skip keys while scanning. Keys that match will be skipped before any subsequent operations are performed
       --min-refresh-delay <NUMBER>
           Set a minimum refresh delay between progress bar updates, in milliseconds.
